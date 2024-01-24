@@ -13,8 +13,30 @@ import torchvision.transforms as T
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision import models
 
+# Required modules for ExecutionTraceObserver 
+from typing import Any, List, Optional
+from torch.profiler import _ExperimentalConfig, ExecutionTraceObserver
+from datetime import datetime
+from time import perf_counter_ns as pc
+from torch.autograd.profiler import profile
+from torchvision import models
+
+
+# Custom Trace handler for Kineto Trace
+def trace_handler(prof)-> Any:
+    kineto_file = "kineto.rank_"+str(g_rank)+"_step_"+str(prof.step_num)
+    torch.profiler.tensorboard_trace_handler("./result",worker_name=kineto_file).__call__(prof)
 
 def example(rank, use_gpu=True):
+    # Register Execution Trace Observer
+    eg_file = "./result/eg.rank_" + str(rank) + ".pt.trace.json"
+    eg = ExecutionTraceObserver()
+    eg.register_callback(eg_file)
+
+    # Define global variable for custom trace_handler 
+    global g_rank
+    g_rank = rank
+
     if use_gpu:
         torch.cuda.set_device(rank)
         model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1).to(rank)
@@ -50,11 +72,11 @@ def example(rank, use_gpu=True):
             torch.profiler.ProfilerActivity.CPU,
             torch.profiler.ProfilerActivity.CUDA],
         schedule=torch.profiler.schedule(
-            wait=2,
-            warmup=2,
-            active=5),
+            wait=1,
+            warmup=3,
+            active=1),
         with_stack=False,
-        on_trace_ready=torch.profiler.tensorboard_trace_handler('./result'),
+        on_trace_ready=trace_handler, # Use our custom trace handler
         record_shapes=True
     ) as p:
         for step, data in enumerate(trainloader, 0):
@@ -63,6 +85,12 @@ def example(rank, use_gpu=True):
                 inputs, labels = data[0].to(rank), data[1].to(rank)
             else:
                 inputs, labels = data[0], data[1]
+
+            # When it is the active stage
+            if step == 3:
+                # Record the trace 
+                eg.start()
+
             outputs = model(inputs)
             loss = criterion(outputs, labels)
 
@@ -70,7 +98,15 @@ def example(rank, use_gpu=True):
             loss.backward()
             optimizer.step()
             p.step()
-            if step + 1 >= 10:
+
+            # When it is the active stage
+            if step == 3:
+                # Stop recording the trace 
+                eg.stop()
+                eg.unregister_callback()
+
+            # Changed termination condition
+            if step + 1 >= 6:
                 break
 
 
@@ -83,7 +119,7 @@ def init_process(rank, size, fn, backend='nccl'):
 
 
 if __name__ == "__main__":
-    size = 4
+    size = 2
     processes = []
     mp.set_start_method("spawn")
     for rank in range(size):
