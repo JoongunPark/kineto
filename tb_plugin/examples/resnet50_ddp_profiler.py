@@ -13,12 +13,12 @@ import torchvision.transforms as T
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision import models
 
-# Required modules for ExecutionTraceObserver 
+# Required modules for ExecutionTraceObserver
 from typing import Any, List, Optional
-from torch.profiler import _ExperimentalConfig, ExecutionTraceObserver
+from torch.profiler import ExecutionTraceObserver
 from datetime import datetime
 from time import perf_counter_ns as pc
-from torch.autograd.profiler import profile
+from torch.autograd.profiler import profile , _ExperimentalConfig
 from torchvision import models
 
 
@@ -33,7 +33,7 @@ def example(rank, use_gpu=True):
     eg = ExecutionTraceObserver()
     eg.register_callback(eg_file)
 
-    # Define global variable for custom trace_handler 
+    # Define global variable for custom trace_handler
     global g_rank
     g_rank = rank
 
@@ -77,6 +77,7 @@ def example(rank, use_gpu=True):
             active=1),
         with_stack=False,
         on_trace_ready=trace_handler, # Use our custom trace handler
+        experimental_config=_ExperimentalConfig(enable_cuda_sync_events=True),
         record_shapes=True
     ) as p:
         for step, data in enumerate(trainloader, 0):
@@ -88,7 +89,13 @@ def example(rank, use_gpu=True):
 
             # When it is the active stage
             if step == 3:
-                # Record the trace 
+                # Stop recording the trace
+                eg.stop()
+                eg.unregister_callback()
+
+            # When it is the active stage
+            if step == 2:
+                # Record the trace
                 eg.start()
 
             outputs = model(inputs)
@@ -99,12 +106,6 @@ def example(rank, use_gpu=True):
             optimizer.step()
             p.step()
 
-            # When it is the active stage
-            if step == 3:
-                # Stop recording the trace 
-                eg.stop()
-                eg.unregister_callback()
-
             # Changed termination condition
             if step + 1 >= 6:
                 break
@@ -113,7 +114,7 @@ def example(rank, use_gpu=True):
 def init_process(rank, size, fn, backend='nccl'):
     """ Initialize the distributed environment. """
     os.environ['MASTER_ADDR'] = '127.0.0.1'
-    os.environ['MASTER_PORT'] = '29500'
+    os.environ['MASTER_PORT'] = '29501'
     dist.init_process_group(backend, rank=rank, world_size=size)
     fn(rank, size)
 
