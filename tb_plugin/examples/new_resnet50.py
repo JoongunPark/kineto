@@ -40,8 +40,6 @@ def trace_handler(prof)-> Any:
 def example(rank, use_gpu=True):
     # Register Execution Trace Observer
     eg_file = "./result/eg.rank_" + str(rank) + ".pt.trace.json"
-    eg = ExecutionTraceObserver()
-    eg.register_callback(eg_file)
 
     # Define global variable for custom trace_handler
     global g_rank
@@ -87,7 +85,9 @@ def example(rank, use_gpu=True):
             active=1),
         with_stack=False,
 #        on_trace_ready=trace_handler, # Use our custom trace handler
-        execution_trace_observer=ExecutionTraceObserver(), # <<<<<<< NEW
+        execution_trace_observer=(
+            ExecutionTraceObserver().register_callback(eg_file)
+        ),
 #        experimental_config=_ExperimentalConfig(enable_cuda_sync_events=True),
         record_shapes=True
     ) as p:
@@ -108,9 +108,9 @@ def example(rank, use_gpu=True):
             p.step()
 
             # Changed termination condition
-            if step + 1 >= 6:
+            if step + 1 >= 10:
                 break
-        kineto_file = "kineto.rank_"+str(g_rank)+"_step_"+str(step)
+        kineto_file = "./result/kineto.rank_"+str(g_rank)+"_step_"+str(step)
         p.export_chrome_trace(kineto_file)
 
 
