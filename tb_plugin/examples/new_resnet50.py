@@ -32,11 +32,6 @@ from torch.autograd.profiler import profile , _ExperimentalConfig
 from torchvision import models
 
 
-# Custom Trace handler for Kineto Trace
-def trace_handler(prof)-> Any:
-    kineto_file = "kineto.rank_"+str(g_rank)+"_step_"+str(prof.step_num)
-    torch.profiler.tensorboard_trace_handler("./result",worker_name=kineto_file).__call__(prof)
-
 def example(rank, use_gpu=True):
     # Register Execution Trace Observer
     eg_file = "./result/eg.rank_" + str(rank) + ".pt.trace.json"
@@ -82,16 +77,15 @@ def example(rank, use_gpu=True):
         schedule=torch.profiler.schedule(
             wait=1,
             warmup=3,
-            active=1),
+            active=1,
+            repeat=1),
         with_stack=False,
-#        on_trace_ready=trace_handler, # Use our custom trace handler
         execution_trace_observer=(
             ExecutionTraceObserver().register_callback(eg_file)
         ),
-#        experimental_config=_ExperimentalConfig(enable_cuda_sync_events=True),
+        experimental_config=_ExperimentalConfig(enable_cuda_sync_events=True),
         record_shapes=True
     ) as p:
-#        for step, data in enumerate(trainloader, 0):
         for step, data in enumerate(trainloader, 0):
             print("step:{}".format(step))
             if use_gpu:
@@ -108,11 +102,10 @@ def example(rank, use_gpu=True):
             p.step()
 
             # Changed termination condition
-            if step + 1 >= 10:
+            if step + 1 >= 5:
                 break
-        kineto_file = "./result/kineto.rank_"+str(g_rank)+"_step_"+str(step)
+        kineto_file = "./result/kineto.rank_"+str(g_rank)+"_step_"+str(step)+".json"
         p.export_chrome_trace(kineto_file)
-
 
 
 def init_process(rank, size, fn, backend='nccl'):
